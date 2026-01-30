@@ -130,23 +130,21 @@ class RGMImageClassifier:
         """Class log-posterior for a single image."""
         if self.K2 > 0:
             zgrid = self._tokens_grid(img_ds)
-            s = self._supertokens_for_grid(zgrid)
-
-            # precompute token likelihood term per block under its assigned supertoken
             rows, cols = zgrid.shape
-            ll_blocks = np.zeros_like(s, dtype=np.float64)
-            k = 0
+
+            log_theta = np.log(self.theta + 1e-12)   # (C, K2)
+            log_psi   = np.log(self.psi   + 1e-12)   # (K2, K)
+
+            # marginalize over supertokens per block:
+            # log p(block | c) = logsumexp_s [ log p(s|c) + sum_z log p(z|s) ]
+            lp = np.log(self.pi + 1e-12)
             for i in range(0, rows, 2):
                 for j in range(0, cols, 2):
                     block_tokens = zgrid[i:i+2, j:j+2].ravel()
-                    si = s[k]
-                    k += 1
-                    ll_blocks[k-1] = np.sum(np.log(self.psi[si, block_tokens] + 1e-12))
-
-            lp = np.log(self.pi + 1e-12)
-            # add log p(s | c) + token terms (class-independent part)
-            for c in range(self.C):
-                lp[c] += np.sum(np.log(self.theta[c, s] + 1e-12)) + np.sum(ll_blocks)
+                    ll_tok = np.sum(log_psi[:, block_tokens], axis=1)       # (K2,)
+                    log_joint = log_theta + ll_tok[None, :]                 # (C, K2)
+                    mx = log_joint.max(axis=1, keepdims=True)
+                    lp += mx.squeeze(1) + np.log(np.sum(np.exp(log_joint - mx), axis=1))
 
             lp -= lp.max()
             p = np.exp(lp)
